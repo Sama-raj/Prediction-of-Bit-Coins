@@ -1,0 +1,964 @@
+---
+title: "Time Series Analysis of Bit Coin"
+author:
+- Jaya Raj Alagu Ponniah(s3700757)
+
+date: "June, 09, 2018"
+output:
+  pdf_document:
+    fig_caption: yes
+  word_document: default
+  html_document:
+    df_print: paged
+fontsize: 24pt
+geometry: margin=1in
+fontfamily: mathpazo
+subtitle: MATH 1318 Project
+documentclass: article
+
+---
+
+
+```{r global_options, include=FALSE,echo=FALSE}
+require(knitr)
+opts_chunk$set(warning=FALSE, message=FALSE,echo=FALSE)
+```
+
+
+
+\newpage
+
+\tableofcontents
+
+\newpage
+# Abstract
+The main aim of this project is to analysis the closing prices of Bitcoin data using descriptive analysis, visualization, model specification, model fitting and selection, diagnostic checking,  and accurately predict the value of bitcoin for the next 10 days.
+
+\newpage
+
+# Introduction
+Any form of currency that only exists digitally relying on cryptography to prevent counterfeiting and fraudulent transactions is defined as cryptocurrency. Bitcoin was the very first Cryptocurrency. It was invented in 2009 by an anonymous person, or group of people, who referred to themselves as Satoshi Nakamoto. When someone sends a bitcoin (or a fraction of a bitcoin) to someone else, "miners" record that transaction in a block and add the transaction to a digital ledger. These blocks are collectively known as the blockchain - an openly accessible ledger of every transaction ever made in bitcoin. Blockchains are distributed across many computers so that the record of transactions cannot be altered. Only 21 million bitcoins can ever be mined and about 17 million have been mined so far. Bitcoin is mined or created, by people (miners) getting their computers to solve mathematical problems, in order to update and verify the ledger.
+
+The value of bitcoin is determined by what people are willing to pay for it, and is very volatile, fluctuating wildly from day to day.  In April 2013, the value of 1 bitcoin (BTC) was around $100 USD. At the beginning of 2017 its value was $1,022 USD and by the 15th of December, it was worth $19,497. As of the 3rd of March 2018, 1 BTC was sold for $11,513 USD. But now it came back to the window of $3800 USD - $4000 USD.
+
+The following dataset is the daily closing price of bitcoin Source: coinmarketcap.com
+\newpage
+
+```{r include=FALSE}
+library(readxl)
+library(TSA)
+library(tseries)
+library(lmtest)
+library(forecast)
+library(fUnitRoots)
+library(fGarch)
+library(rugarch)
+library(CombMSC)
+library(readxl)
+library(ggplot2)
+```
+
+
+# Analysis of Bitcon data
+The data is plotted against time inorder to make fist inferences.
+
+```{r include=FALSE}
+data = read.csv("Bitcoin_Historical_Price.csv")
+data$Close = as.numeric(as.character(gsub(",","",data$Close)))
+#data$Date<-as.Date(data$Date, format = "%d/%m/%Y")
+data$Date = as.Date(data$Date,format="%d/%m/%y") %>% format("20%y%m%d") %>% as.Date("%Y%m%d")
+
+d = ts(as.vector(data$Close),start=c(2013,117),frequency = 365)
+```
+
+```{r fig.cap=paste("\\label{fig:ss}Bitcoin data after 2019")}
+# Overall Plot
+plot.ts(d,xlab='Year',type='l',ylab='USD', main = "CryptoCurrency Data")
+```
+On ploting the data from the figure  we see multiple trends from 2013 to 2017, 2017 to 2018 and another trend from 2018 onwards.We can also see inflection points in 2017 and 2018.The data also has changing variations, fluctuations around the trend and auto regressive properties.We can also see no seasonality in the data. Hence there are two different trends we analyse the data from 2018. 
+
+
+```{r  echo=FALSE}
+# 2018 and 2019 Data only
+data_18 = data[data$Date >= "2018-01-01" ,]
+data_19 = data[data$Date >= "2019-01-01" ,]
+data_t_1 = ts(as.vector(data_18$Close),start=c(2018,1),frequency = 365)
+data_t_2 = ts(as.vector(data_18$Close),start=c(2018,1), end = c(2018,365),frequency = 365)
+data_t_3 = ts(as.vector(data$Close),start=c(2013,117), end = c(2018,1),frequency = 365)
+data_t_4 = ts(as.vector(data_19$Close),start=c(2019,1),frequency = 365)
+```
+
+```{r fig.cap=paste("\\label{fig:plotz2019}Bitcoin data after 2019")}
+par(mfrow=c(3,1))
+plot.ts(data_t_3,xlab='Year',type='l', main = "CryptoCurrency Data till 2018")
+plot.ts(data_t_2,xlab='Year',type='l', main = "Bitcoin Data 2018 Jan to Dec")
+plot.ts(data_t_4,xlab='Year',type='l',ylab='USD(Currenct)', main = "CryptoCurrency data in 2019")
+
+```
+As we split the data we can observe tho sepetate trends in which they are not inter-related.
+
+
+```{r fig.cap=paste("\\label{fig:plot2019}Bitcoin data after 2019")}
+plot.ts(data_t_4,xlab='Year',type='l',ylab='USD(Currenct)', main = "CryptoCurrency data in 2019")
+```
+
+Now Lets see we can make out any inference from the ACF and PACF plots
+
+
+## Analysis of full data
+```{r }
+# analysis of full data
+par(mfrow=c(1,2))
+acf(as.vector(d),lag.max =100,main="The sample ACF of series")
+pacf(as.vector(d),main="The sample PACF of series")
+```
+
+ We can see from both acf and pacf plots that the data has characteristics of auto regressive plot of the first order.
+There is smooth decay in the lags in ACF and there is one signigicant lag in PACF and it cuts off then several 4,8,10 lags need to be further investigation.
+
+```{r}
+residual.analysis <- function(model, std = TRUE){
+ 
+  res.model = residuals(model)
+  par(mfrow=c(3,2))
+  plot(res.model,type='l',ylab='Standardised residuals', main="Time series plot of standardised residuals")
+  abline(h=0)
+  hist(res.model,main="Histogram of standardised residuals")
+  qqnorm(res.model,main="QQ plot of standardised residuals")
+  qqline(res.model, col = 2)
+  acf(res.model,main="ACF of standardised residuals")
+  print(shapiro.test(res.model))
+  print(Box.test(res.model, lag = 6, type = "Ljung-Box", fitdf = 0))
+  tsdiag(model,gof=15,omit.initial=F)
+}
+
+```
+
+Now wecapply BoxCox transformation to full data
+
+```{r }
+# Applying transformation to full data
+d.t = BoxCox.ar(d,method = "yule-walker")
+```
+
+From the figure we can say that the lamda value is o which inplies log transformation has to be applided to the data.
+Now we check of non-stationary
+```{r}
+adf.test(d ,alternative = c("stationary"))
+```
+
+While doing the ADF test for the non transforned data we can say that the AFD test infers that the model is stationary as the p-value is greater than (0.05 )significance level but fron the ACF and PACF and the residual plots we can say that the model is not stationary and hence we conclude that the data is non-stationary.
+
+```{r fig.cap=paste("\\label{fig:6}Bitcoin after Differencing")}
+d.transform = log(d) # Since 0 is in the interval
+par(mfrow=c(1,2))
+plot(d,type='l',ylab='Time series plot of log series')
+
+diff.d = diff(d.transform, differences = 1) 
+plot(diff.d,type='l',ylab='first difference of series')
+
+order = ar(diff(diff.d))$order
+adfTest(diff.d, lags = order,  title = NULL,description = NULL)
+```
+
+From this inference (We use ADF test from tseries package) we can say that the Full data is is stationary after log transformation and first order differencing since we reject the null hypothesis of ADF test since p-value is less than the significance level(0.05)
+
+```{r fig.cap=paste("\\label{fig:7}ACF and PACF after Differencing")}
+par(mfrow=c(1,2))
+acf(as.vector(diff.d))
+pacf(as.vector(diff.d))
+```
+
+From the ACF amd PACF There are several significant lags and there is a cut off behaviour and there is no significant decay in both plots and hence we consider EACF to make further inference.
+
+Now We consider EACF
+```{r}
+eacf(diff.d)
+```
+
+From The EACF diagram it is infered that q=1 and p=1 and we can see GARCH characteristics.
+
+### McLeod-Li Test and QQ Plot
+
+```{r fig.cap=paste("\\label{fig:10}McLeod-Li Test and QQ Plot")}
+par(mfrow=c(1,2))
+McLeod.Li.test(y=diff.d,main="McLeod-Li Test Statistics")
+
+qqnorm(diff.d,ain="Q-Q Normal Plot of Daily Google Returns")
+qqline(diff.d) 
+
+```
+
+* McLeod-Li test is significnat at 5% level of significance for all lags. This gives a strong idea about existence of volatiliy clustering.
+* In QQplot Fat tails is in accordance with volatiliy clustering
+ 
+For further investigaion we see EACF Table
+```{r}
+eacf(diff.d)
+```
+* From This EACF Table we get p=1,q=1,we see typical garch effect
+
+
+
+### Garch Model on full data
+
+```{r}
+return = diff.d*100
+```
+
+```{r}
+plot(return,type='l',ylab="closing rate",main="Time series plot")
+```
+
+From the differenced Timeseries plt we can say that there are characteristics of Autoregressive and Moving Average series and we can infer arch effect.
+\newline
+So we'll use absolute value and square transformations to figure out this ARCH effect.
+
+```{r echo=TRUE,include=TRUE}
+#So we'll use absolute value and square transformations to figure out this ARCH effect.
+abs.return = abs(return)
+sq.return = return^2
+```
+
+```{r fig.cap=paste("\\label{fig:18}ACF and PACF Plots for Absolute series")}
+par(mfrow=c(1,2))
+acf(abs.return, ci.type="ma",main="Sample ACF for absolute return series")
+pacf(abs.return, main="Sample PACF for absolute return series")
+```
+* We can Infer that there is a small decay in the ACF plots and  there are sign of residuals being dependant to eachother.we observe many signficicant lags in both ACF and PACF
+
+### EACF For absolute value transformation
+```{r echo=TRUE,include=TRUE}
+eacf(abs.return)
+# After the absolute value transformation, we observe many signficicant lags in both ACF and PACF. Also, EACF does not suggest an ARMA(0,0) model.
+# From the EACF, we can identify ARMA(1,1) and ARMA(1,2) models for absolute value series. 
+# These models correspond to parameter settings of [max(1,1),1] and [max(1,2),1]. So the corresponding 
+# tentative GARCH models are GARCH(1,1) and GARCH(2,1).
+```
+* After the absolute value transformation, we observe many signficicant lags in both ACF and PACF. Also, EACF does not suggest an ARMA(0,0) model.
+* From the EACF, we can identify ARMA(1,1) and ARMA(1,2) models for absolute value series. 
+* These models correspond to parameter settings of [max(1,1),1] and [max(1,2),1]. 
+* The corresponding tentative GARCH models are GARCH(1,1) and GARCH(2,1).
+
+```{r fig.cap=paste("\\label{fig:19}ACF and PACF for Squared returns")}
+par(mfrow=c(1,2))
+acf(sq.return, ci.type="ma",main="Sample ACF for sq.Return series")
+pacf(sq.return, main="Sample PACF plot sq.Return series")
+```
+
+* We can Infer that there is no cutoff in the ACF plot  and there are sign of residuals being dependant to eachother.we observe many signficicant lags in both ACF and PACF
+
+### EACF for for squared return series
+```{r}
+  eacf(sq.return)
+```
+* The EACF of squared return series gives us ARMA(2,3),(3,3),(4,3). Which are all higher order 
+* These models correspond to parameter settings of [max(2,3),1] and [max(3,3),1]. 
+* The corresponding tentative GARCH models are GARCH(2,3),GARCH(3,4) and GARCH(3,3).
+
+## Analysis of Bitcoin From 2018
+
+Now We analyse the data from 2018 onwards because since there is a inflection point in the end of year 2017, as the awareness of bitcoin was spread throughout the world. As more peopele were aware of bitcoin, people started trading it and hecne there was a sudden increase in the price of bitcoin and hence there will be obvious change in the behaviour in the trend. Here we analyse the data from  2018. Here 2 seperate analysis are done without Transforming data and transforming the data.
+
+### Analysis of Nontransdormend data
+
+#### ADF Test
+
+```{r}
+adf.test(data_t_1)
+
+# Using adf test we get a p-value of 0.01, we reject the null hypothesis stating that
+# the series is non-stationary
+```
+
+From the ADF test for the non transforned data consisting only post 2018, we can say that the AFD test infers that the model is non  stationary as the p-value is lesser than (0.05 )significance level. we consider EACF to make further inference.
+
+
+
+#### PACF,ACF Test
+
+```{r fig.cap=paste("\\label{fig:99}ACF and PACF")}
+par(mfrow=c(1,2))
+acf(data_t_1)
+pacf(data_t_1)
+```
+
+* From the ACF and PACF we can say that we observe Autoregressive characteristics of first order. 
+* There is smooth decay in the lags in ACF and there is one signigicant lag in PACF and the further 
+investigation is needed inorder to determin the fourth lag in PACF
+
+
+
+
+From EACF
+```{r}
+eacf(data_t_1)
+```
+
+From The EACF diagram it is infered that q= 0and p=1 and we can see GARCH characteristics.
+
+**From the above inferences we Apply only auto rgeressive model to 2018 data and using the residuals for GARCH model**
+
+```{r fig.cap=paste("\\label{fig:7}Timeseries Plot of the resuduals")}
+m2= arima(data_t_1,order=c(1,0,0),method='ML')
+res.m2 = residuals(m2);
+plot(res.m2,xlab='Time',ylab='Residuals',main="Time series plot of the residuals")
+```
+
+#### Testing for significant coefficients
+
+```{r}
+coeftest(m2)
+```
+
+From the test We can see that the coefficients are significant
+
+``` {r fig.cap=paste("\\label{fig:8}Timeseries Plot of the resuduals")}
+par(mfrow=c(1,2))
+acf(as.vector(res.m2))
+pacf(as.vector(res.m2))
+```
+
+Except the significant autocorrelation at lag 4, there are almost no sign of violaton of indipendance of residuals.
+
+#### Residual Analysis
+```{r fig.cap=paste("\\label{fig:9}Residual Analysis")}
+residual.analysis(m2)
+```
+
+* From The resididual Plot we can see a dampering effect but there is no change in the mean level variance level. The residuals are not random
+* The Histogram of standardised residuals seens to have a normal distribuition
+* From the QQ Plot we can infer thet the residuals are normally distribuited
+* The Shapiro-Wilk test confirms the normality of the residuals.
+* From The ACF plot we can say that the first lag is not significant and the lag 4 is significant.
+
+#### McLeod-Li Test and QQ Plot
+
+```{r fig.cap=paste("\\label{fig:11}McLeod-Li Test and QQ Plot")}
+par(mfrow=c(1,2))
+McLeod.Li.test(y=res.m2,main="McLeod-Li Test Statistics")
+qqnorm(res.m2,ain="Q-Q Normal Plot of Daily Google Returns")
+qqline(res.m2) 
+```
+
+* McLeod-Li test is significnat at 5% level of significance for all lags. This gives a strong idea about existence of volatiliy clustering.
+* From the QQ plot, fat tails is in accordance with volatiliy clustering.
+
+\newpage
+From EACF
+```{r}
+eacf(res.m2)
+```
+
+* From this we can say that the residual has GARCH Characteristics
+
+### Transforming the 2018 data and analysing (BoxCox)
+
+```{r fig.cap=paste("\\label{fig:12}BoxCox Transformation")}
+data.t = BoxCox.ar(data_t_1)
+data.t$ci
+```
+
+* From The Boxcox tranformation graph we can say that the lamda lies between -0.5 to -0.2 and hence we conclude that the lambda is 0.35
+
+```{r echo=TRUE,include=TRUE}
+lambda =-0.35
+data_ts.t = (data_t_1^lambda-1)/lambda
+```
+
+```{r fig.cap=paste("\\label{fig:13}Transformed data Post 2018")}
+plot(data_ts.t,type='l',ylab=' Transformed data')
+```
+
+* From This graph we can infer that the Data has Auto-Regressive characteristics. Still the plot is non-stationary.
+Now Applying AFD test we get
+
+#### ADF Test
+```{r}
+adf.test(data_ts.t)
+adfTest(data_ts.t)
+```
+
+The ADF test shows that it is not significant at 95% interval so it is not-stationary.
+#### Testing the Significance of coefficience
+```{r}
+data_ts_diff = diff(data_ts.t)
+
+ar(diff(data_ts_diff))
+```
+
+#### ADF Test
+```{r}
+adfTest(data_ts_diff, lags = 10)
+```
+
+From this inference (We use ADF test from tseries package) we can say that the Full data is is stationary after log transformation and first order differencing since fail to reject the null hypothesis of ADF test since p-value is less than the significance level(0.05)
+
+Now we see the residual plot:
+
+```{r fig.cap=paste("\\label{fig:14}Residual Plot")}
+plot(data_ts_diff,type='l',ylab='Non stationary Data')
+```
+
+```{r fig.cap=paste("\\label{fig:15}ACF and PACF Transformed data Post 2018")}
+par(mfrow=c(1,2))
+acf(data_ts_diff, main = 'ACF Plot')
+pacf(data_ts_diff, main = 'PACF PLOT')
+```
+
+* PACF has no significant lags therefore p value is 0
+* ACF has one significant lag therefore the q value is 0
+* Since there is no significant lags we can conclude that this is the characteristics of white noise.
+
+we further investigate with EACF
+```{r}
+eacf(data_ts_diff)
+```
+* The EACF also supports white noise series at ARIMA(0,1,0) therefore it is a random walk series
+
+#### BIC table
+```{r}
+# BIC table
+res = armasubsets(y=data_ts_diff,nar=3,nma=3,y.name='test')
+# In the BIC table shaded columns correspond to p=1 and q=2
+plot(res)
+```
+From The Bic we can conclude that the MA(2),AR(1) and AR(2) are significant
+
+#### Coefficient test for ARIMA(1,1,1)
+```{r}
+# ARIMA(1,1,1)
+model_111_css = arima(data_ts.t,order=c(1,1,1),method='CSS')
+coeftest(model_111_css)
+
+model_111_ml = arima(data_ts.t,order=c(1,1,1),method='ML')
+coeftest(model_111_ml)
+
+```
+
+* The coefficients in both methods ML and CSS are not significant
+
+#### Coefficient test for ARIMA(1,0,0)
+```{r}
+# ARIMA(1,0,0)
+model_100_css = arima(data_ts.t,order=c(1,0,0),method='CSS')
+coeftest(model_100_css)
+
+model_100_ml = arima(data_ts.t,order=c(1,0,0),method='ML')
+coeftest(model_100_ml)
+```
+
+* The coefficients in both methods ML and CSS are significant
+
+#### Coefficient test for ARIMA(1,1,0)
+```{r}
+# ARIMA(1,1,0)
+model_110_css = arima(data_ts.t,order=c(1,1,0),method='CSS')
+coeftest(model_100_css)
+
+model_110_ml = arima(data_ts.t,order=c(1,1,0),method='ML')
+coeftest(model_100_ml)
+
+```
+* The coefficients in both methods ML and CSS are significant
+
+
+#### Coefficient test for ARIMA(1,1,0)
+```{r}
+# ARIMA(0,1,1)
+model_011_css = arima(data_ts.t,order=c(0,1,1),method='CSS')
+coeftest(model_011_css)
+
+model_011_ml = arima(data_ts.t,order=c(0,1,1),method='ML')
+coeftest(model_011_ml)
+```
+* The coefficients in both methods ML and CSS are not significant
+
+#### Coefficient test for ARIMA(2,1,2)
+```{r}
+# ARIMA(2,1,2)
+model_212_css = arima(data_ts.t,order=c(2,1,2),method='CSS')
+coeftest(model_212_css)
+
+model_212_ml = arima(data_ts.t,order=c(2,1,2),method='ML')
+coeftest(model_212_ml)
+```
+
+* The coefficients of ar1,ar2,ma1 are not significant in conditional sum of squares function and in Maximum Likelyhood the coefficients of ar1, ma1 are not significant
+
+```{r}
+# ARIMA(0,0,2)
+model_002_css = arima(data_ts.t,order=c(0,0,2),method='CSS')
+coeftest(model_212_css)
+
+model_002_ml = arima(data_ts.t,order=c(0,0,2),method='ML')
+coeftest(model_212_ml)
+```
+
+* The coefficients of,ar2,ma2 are the only significant  in conditional sum of squares function and in Maximum Likelyhood the coefficients of ar2,ma2 are not significant
+
+#### AIC
+```{r}
+sort.score <- function(x, score = c("bic", "aic")){
+  if (score == "aic"){
+    x[with(x, order(AIC)),]
+  } else if (score == "bic") {
+    x[with(x, order(BIC)),]
+  } else {
+    warning('score = "x" only accepts valid arguments ("aic","bic")')
+  }
+}
+sc.AIC = AIC(model_011_ml,model_111_ml,model_212_ml,model_100_ml,model_110_ml)
+z<-sort.score(sc.AIC, score = "aic")
+kable(z, caption="\\label{tab:bic}AIC TABLE")
+
+```
+
+From The sorted AIC values we choose model ARIMA(011) as the coefficients of ARIMA(111) are not significant
+* we choose model002(zxcvbnm,.)
+
+```{r fig.cap=paste("\\label{fig:16}Residuals of the model ARIMA(0,1,1) for data Post 2018")}
+res.m3 = residuals(model_011_ml);
+plot(res.m3,xlab='Time',ylab='Residuals',main="Time series plot of the residuals")
+
+```
+```{r fig.cap=paste("\\label{fig:17}Residuals Analysis of the model ARIMA(0,1,1)")}
+residual.analysis(model_011_ml)
+```
+* From The resididual Plot we can changing variance and is no change in the mean level variance level. The residuals are not random.
+* The Histogram of standardised residuals seens to have a normal distribuition
+* From the QQ Plot we cannot infer thet the residuals are normally distribuited
+* The Shapiro-Wilk test **denies** the normality of the residuals.
+* From The ACF plot we can say that white noise characteristics is present.
+* From McLeod-Li test all the residuals are not captured 
+
+
+
+
+## GARCH on residuals of 2018 data with auto regressive model
+
+```{r}
+retrun = res.m2
+
+
+```
+
+```{r fig.cap=paste("\\label{fig:20}ACF and PACF for Absolute return")}
+#So we'll use absolute value and square transformations to figure out this ARCH effect.
+abs.return = abs(return)
+sq.return = return^2
+
+par(mfrow=c(1,2))
+acf(abs.return, ci.type="ma",main="Sample ACF for absolute return")
+pacf(abs.return, main="Sample PACF for absolute return")
+```
+
+* We can Infer that there is a small decay in the ACF plots and  there are sign of residuals being dependant to eachother.we observe many signficicant lags in both ACF and PACF
+
+### EACF
+```{r}
+eacf(abs.return)
+```
+
+* The EACF of absolute value trnsformation gives us ARMA(2,2),(1.2),(1,1) 
+* These models correspond to parameter settings of [max(1,2),1],[max(1,1),1] and [max(2,2),1]. 
+* The corresponding tentative GARCH models are GARCH(2,1),GARCH(1,1) 
+
+```{r fig.cap=paste("\\label{fig:21}ACF and PACF for Sq.return")}
+par(mfrow=c(1,2))
+acf(sq.return, ci.type="ma",main="Sample ACF for squared return")
+pacf(sq.return, main="Sample PACF for squared return")
+```
+
+* We can Infer that there is no decay in the ACF plots and  there are sign of residuals being dependant to eachother.we observe many signficicant lags in both ACF and PACF
+
+### EACF On Suared Return SEries
+```{r}
+eacf(sq.return)
+```
+
+
+* The EACF of squared return series gives us ARMA(2,3),(3,3),(4,3),(5,3) Which are all higher order 
+* The Caef does not conclude a particular model.
+
+## GARCH on 2018 data
+```{r}
+return1 = diff(log(data_t_1))*100
+```
+
+```{r fig.cap=paste("\\label{fig:22}ACF and PACF for Absolute return")}
+#So we'll use absolute value and square transformations to figure out this ARCH effect.
+abs.return = abs(return1)
+sq.return = return1^2
+par(mfrow=c(1,2))
+acf(abs.return, ci.type="ma",main="The sample ACF plot for absolute return series")
+pacf(abs.return, main="The sample PACF plot for absolute return series")
+```
+
+* We can Infer that there is no decay in the ACF plots and  there are sign of residuals being dependant to eachother.we observe many signficicant lags in both ACF and PACF
+
+### EACF
+```{r}
+eacf(abs.return)
+```
+
+* After the absolute value transformation, we observe many signficicant lags in both ACF and PACF. Also, EACF does not suggest an ARMA(0,0) model.
+* From the EACF, we can identify ARMA(1,1) and ARMA(1,2), ARMA (2,2) models for absolute value series. 
+* These models correspond to parameter settings of [max(1,2),1] and [max(1,2),2]. So the corresponding 
+* tentative GARCH models are GARCH(2,2) and GARCH(2,1)
+
+```{r fig.cap=paste("\\label{fig:22}ACF and PACF for Sq.return")}
+par(mfrow=c(1,2))
+acf(sq.return, ci.type="ma",main="The sample ACF plot for squared return series")
+pacf(sq.return, main="The sample PACF plot for squared return series")
+```
+
+* We can Infer that there is no decay in the ACF plots and  there are sign of residuals being dependant to eachother.we observe many signficicant lags in both ACF and PACF
+
+### EACF
+```{r}
+eacf(sq.return)
+```
+* There is not a very clear pattern in the EACF. The fuzziness of the signal in the EACF table is likely caused by the larger sampling variability when we deal with higher moments.
+* The EACF of squared return series gives us ARMA(1,),(2,3),(3,3), 
+* The EACF is not very clear and hence concluding particular models is very hard, this shows the typical GARCH characteristics
+
+## GARCH on residulas of ARIMA model on 2018 data
+```{r}
+return = res.m3
+```
+
+```{r fig.cap=paste("\\label{fig:23}ACF and PACF for Absolute  Value")}
+#So we'll use absolute value and square transformations to figure out this ARCH effect.
+abs.return = abs(return)
+sq.return = return^2
+
+par(mfrow=c(1,2))
+acf(abs.return, ci.type="ma",main="Sample ACF for absolute return")
+pacf(abs.return, main="Sample PACF for absolute return")
+```
+
+##EACF
+```{r}
+eacf(abs.return)
+```
+
+* After the absolute value transformation, we observe many signficicant lags in both ACF and PACF. Also, EACF does not suggest an ARMA(0,0) model.
+* From the EACF, we can identify ARMA(1,1) and ARMA(1,2), ARMA (2,2) models for absolute value series. 
+* These models correspond to parameter settings of [max(1,2),1] and [max(1,2),2]. So the corresponding 
+* tentative GARCH models are GARCH(2,2) and GARCH(2,1)
+
+```{r}
+par(mfrow=c(1,2))
+acf(sq.return, ci.type="ma",main="The sample ACF plot for squared return series")
+pacf(sq.return, main="The sample PACF plot for squared return series")
+eacf(sq.return)
+```
+
+
+## Estimation of Parameters of MODEL 1
+```{r}
+m_1 = garch(return1,order = c(1,2),trace=FALSE)
+summary(m_1)
+```
+For the GARCH(1,2) model, **two** of the parameters are insignificant at 5% level
+
+### Residual Analysis
+```{r}
+residual.analysis =  function(model, std = TRUE){
+res.model = residuals(m_1)
+  par(mfrow=c(3,2))
+  plot(res.model,type='o',ylab='Standardised residuals', main="Time series plot of standardised residuals")
+  abline(h=0)
+  hist(res.model,main="Histogram of standardised residuals")
+  acf(res.model, na.action = na.omit,main="ACF of standardised residuals")
+  pacf(res.model, na.action = na.omit ,main="PACF of standardised residuals")
+  qqnorm(res.model,main="QQ plot of standardised residuals")
+  qqline(res.model, col = 2)
+  print(shapiro.test(res.model))
+  McLeod.Li.test(y=res.model,main="McLeod-Li Test Statistics")
+  }
+```
+
+```{r}
+residual.analysis(m_1)
+```
+
+* From The resididual Plot we can changing variance and is no change in the mean level variance level. The residuals are not random.
+* The Histogram of standardised residuals seens to have a normal distribuition
+* From the QQ Plot we cannot infer thet the residuals are normally distribuited
+* The Shapiro-Wilk test **denies** the normality of the residuals.
+* From The ACF and pacf plot we can say that white noise characteristics is present.
+* From McLeod-Li test all the residuals are not captured 
+
+## Significant Test Model 2
+```{r}
+m_2 = garch(return1,order = c(2,2),trace=FALSE)
+
+summary(m_2)
+```
+For the GARCH(2,2) model, only **two** of the parameters are significant at 5% level(a0,a1)
+
+
+### Residual Analysis
+```{r}
+residual.analysis(m_2)
+```
+
+* From The resididual Plot we can changing variance and is no change in the mean level variance level. The residuals are not random.
+* The Histogram of standardised residuals seens to have a normal distribuition
+* From the QQ Plot we cannot infer thet the residuals are normally distribuited
+* There is no lag for which ACF values exceed the limits and all p-values are higher than 5%, suggesting that the squared residuals are uncorrelated over time, and hence the standardized residuals may be independent.
+* The Shapiro-Wilk test **denies** the normality of the residuals.
+* From The ACF plot we can say that white noise characteristics is present.
+* From McLeod-Li test all the residuals are not captured 
+
+### AIC TABLE
+```{r}
+AIC(m_1,m_2)
+```
+
+
+### Fiting ARMA+GARCH
+```{r}
+model1 = ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(2,1)), 
+                  mean.model = list(armaOrder = c(0,0), include.mean = FALSE), 
+                  distribution.model = "norm")
+```
+
+```{r}
+model3 = ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(2,1)), 
+                  mean.model = list(armaOrder = c(2,2), include.mean = FALSE), 
+                  distribution.model = "norm")
+```
+
+```{r}
+model4 = ugarchspec(variance.model = list(model = "sGARCH", garchOrder = c(2,2)), 
+                  mean.model = list(armaOrder = c(2,2), include.mean = FALSE), 
+                  distribution.model = "norm")
+```
+
+
+```{r}
+m1<-ugarchfit(spec=model1,data=return, out.sample = 100)
+```
+
+#### 1. Model 1
+```{r}
+m1
+```
+
+
+####  Information Criteria of Model 1
+```{r}
+infocriteria(m1)
+```
+
+#### Residual Analysis of Model 1
+
+```{r}
+residual.analysis(m1)
+```
+
+* From The resididual Plot we can changing variance and is no change in the mean level variance level. The residuals are not random.
+* The Histogram of standardised residuals seens to have a normal distribuition
+* From the QQ Plot we cannot infer thet the residuals are normally distribuited
+* There is no lag for which ACF values exceed the limits and all p-values are higher than 5%, suggesting that the squared residuals are uncorrelated over time, and hence the standardized residuals may be independent.
+* The Shapiro-Wilk test **denies** the normality of the residuals.
+* From The ACF and PACF plot we can say that white noise characteristics is present.
+* From McLeod-Li test all the residuals are not captured 
+
+
+#### 2. Model 2
+```{r}
+m3<-ugarchfit(spec=model3,data=data_ts_diff, out.sample = 100, solver.control = list(trace=0))
+
+```
+
+```{r}
+m3
+```
+
+####  Information Criteria of Model 2
+```{r}
+infocriteria(m3)
+```
+
+
+#### Residual Analysis of Model 2
+```{r}
+residual.analysis(m3)
+```
+
+* From The resididual Plot we can changing variance and is no change in the mean level variance level. The residuals are not random.
+* The Histogram of standardised residuals seens to have a normal distribuition
+* From the QQ Plot we cannot infer thet the residuals are normally distribuited
+* There is no lag for which ACF values exceed the limits and all p-values are higher than 5%, suggesting that the squared residuals are uncorrelated over time, and hence the standardized residuals may be independent.
+* The Shapiro-Wilk test **denies** the normality of the residuals.
+* From The ACF and PACF plot we can say that white noise characteristics is present.
+* From McLeod-Li test all the residuals are not captured 
+
+#### 3. Model 3
+```{r}
+m4<-ugarchfit(spec=model4,data=data_ts_diff, out.sample = 100, solver.control = list(trace=0))
+```
+
+```{r}
+m4
+```
+
+####  Information Criteria of Model 3
+```{r}
+infocriteria(m4)
+```
+
+#### Residual Analysis of Model 3
+```{r}
+residual.analysis(m4)
+```
+
+
+* From The resididual Plot we can changing variance and is no change in the mean level variance level. The residuals are not random.
+* The Histogram of standardised residuals seens to have a normal distribuition
+* From the QQ Plot we cannot infer thet the residuals are normally distribuited
+* There is no lag for which ACF values exceed the limits and all p-values are higher than 5%, suggesting that the squared residuals are uncorrelated over time, and hence the standardized residuals may be independent.
+* The Shapiro-Wilk test **denies** the normality of the residuals.
+* From The ACF and PACF plot we can say that white noise characteristics is present.
+* From McLeod-Li test all the residuals are not captured 
+
+
+**Based on the residual analysis and AIC values the model chosen for forecasting is ARMA(1,1)+GARCH(2,1) **
+
+
+#### Forcasting 
+
+```{r}
+forc = ugarchforecast(m3, data = data_ts_diff, n.ahead = 10, n.roll =10)
+forc
+```
+
+```{r fig.cap=paste("\\label{fig:23}Forcasting")}
+
+plot(forc, which ="all")
+```
+
+
+```{r}
+MASE = function(observed , fitted ){
+  # observed: Observed series on the forecast period
+  # fitted: Forecast values by your model
+  Y.t = observed
+  n = length(fitted)
+  e.t = Y.t - fitted
+  sum = 0 
+  for (i in 2:n){
+    sum = sum + abs(Y.t[i] - Y.t[i-1] )
+  }
+  q.t = e.t / (sum/(n-1))
+  MASE = data.frame( MASE = mean(abs(q.t)))
+  return(list(MASE = MASE))
+}
+```
+
+```{r}
+obs <- read_excel("D:/rmit/Time series analysis/project/Bitcoin_Prices_Forecasts.xlsx")
+
+```
+
+```{r}
+obs_data = ts(as.vector(obs$`Closing price`),start=c(2019,56),frequency = 365)
+```
+
+```{r}
+plot(obs_data,xlab='Time',ylab='Price',main="Time series plot of the actual data")
+```
+```{r}
+fitted_data = fitted(forc)
+
+fitted_data = fitted_data[1:10]
+range(fitted_data)
+fit_data = ts(as.vector(fitted_data),start=c(2019,56),frequency = 365)
+```
+
+```{r}
+fit_actual= diffinv(fit_data,  differences = 1, xi = data_ts.t[420])
+```
+
+```{r}
+fit_final = InvBoxCox(fit_actual[1:10],lambda = lambda)
+
+final = ts(as.vector(fit_final),start=c(2019,56),frequency = 365)
+kable(final, caption="\\label{tab:Forecast}")
+
+m3 <- ugarchspec()
+m.fit <-ugarchfit(spec=m3,data=data_ts_diff)
+fitted.values = fitted(m.fit)
+fit_data_1 = ts(as.vector(fitted.values),start=c(2018,1),frequency = 365)
+fit_actual_1= diffinv(fit_data_1,  differences = 1, xi = data_ts.t[1])
+fit_final_1 = InvBoxCox(fit_actual_1,lambda = lambda)
+final_1 = ts(as.vector(fit_final_1),start=c(2018,1),frequency = 365)
+```
+
+\newpage
+
+# Discussion
+## Analysing Data from 2013 to 2019
+* On applying box cox transformation, we get a log transform and the series becomes stationary after first differencing
+* The acf, pact, eacf plots after transformation and differencing showed characteristics of GARCH model
+* We directly used the transformed data to fit a GARCH model
+But the acf, pact and eacf with absolute and squared data gave candidates models of higher orders of 3 and 4 only.
+
+## Analysing Data from 2018 onwards-Model Selection
+* For the data post 2018 we can observe first order auto regressive properties in acf and pacf plot
+* The ads test gave a result that the data was stationary
+We fitted a ARMA(1,0) model based on this input, the coefficients were found to be significant
+* But the residuals from this model did not yield a suitable GARCH model
+* Then we applied Box-cox Transformation to the model and took the first difference, the series was again stationary
+* Based on eacf and BIC tables we fit ARIMA(1,1,1),  ARIMA(0,1,1), ARIMA(2,1,2) models as well on the data
+* ARIMA(0,1,1) was found to be the best model based on residuals and AIC values
+* The residuals from this model where used to model the GARCH series
+
+\newpage
+
+# Result
+* We also modelled the GARCH series on the return data from the closing price post 2018
+* From both sets of analysis candidates GARCH models were GARCH(1,1) and GARCH(2,1)
+* Next we modelled the GARCH and ARMA+GARCH series 
+Based on the residual analysis and AIC values the model chosen was ARMA(0,1)+GARCH(2,1) 
+
+```{r fig.cap=paste("\\label{fig:24}Actual VS Forcasted")}
+plot(final,xlab='Time',ylab='Residuals',main="Time series of Actual VS Forcasted",ylim = c(3700,3950),col="red")
+lines(obs_data, type = 'o', ylim=c(3700,3950))
+```
+```{r fig.cap=paste("\\label{fig:25}}Actual VS Fitted")}
+plot(final_1,xlab='Time',ylab='USD',main="Actual VS Fitted", type = 'l',col = 'red',ylim = c(2000,17500))
+lines(data_t_1, type = 'l')
+
+```
+The Red line indicates the values which we get from the model
+in forcast and fitted values
+
+```{r}
+MASE(as.vector(obs_data),as.vector(final))
+MASE(as.vector(data_t_1),as.vector(final_1))
+
+```
+* Based on this model, we compared the forecasted values with the observed values which gave us MASE of 1.5255
+* Based on this model, we compared thefitted values with the original series which gave us MASE of 7.5218
+
+
+
+\newpage
+
+# Conclusion
+
+The Analysis of the bitcoin data was very challenging. We were not able to satisfy all the model assumptions and criterias. Several Models were analysed and ARIMA(0,1,1) was found to be the best model based on residuals and AIC values. The residuals from this model where used to model the GARCH series. Similar to the ARIMA series seberal GARCH models were analysed. Based on the residual analysis and AIC values the model chosen was **ARMA(0,1)+GARCH(2,1)** based on the scope of this subject.
+\newline
+
+Values                 | BEST MASE
+-------------          | -------------
+Over fitted values     | 7.5218
+Over forecasts	       | 1.5255
+
+
+
